@@ -1,0 +1,16 @@
+/* 重置样式 */
+* {
+    padding: 0;
+    margin: 0;
+}
+
+/* canvas是个行内标签，不能使用margin: auto居中 */
+#canvas {
+    border: 1px solid blue;
+}
+
+#stage {
+    width: 480px;
+    height: 650px;
+    margin: auto;
+}
