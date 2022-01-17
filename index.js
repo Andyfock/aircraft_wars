@@ -27,6 +27,10 @@ bg.src = "/img/background.png";
 const copyright = new Image();
 copyright.src = "/img/shoot_copyright.png"
 
+// 初始化暂停图片
+const pause = new Image();
+pause.src = "/img/game_pause.png"
+
 //初始化四张飞机大战加载图片
 const loading_frame = [];
 loading_frame[0] = new Image();
@@ -286,12 +290,21 @@ class Hero {
         //子弹射击的间隔
         this.shootInterval = 200;
         this.bulletList = [];
+        this.destory = false;
     }
     judge() {
         const currentTime = new Date().getTime();
         if(currentTime - this.lastTime > this.speed) {
             // live只有俩状态 防止下标
-            this.img = this.frame.live[this.frameLiveindex++ % this.frame.live.length];
+            if(this.live) {
+                this.img = this.frame.live[this.frameLiveindex++ % this.frame.live.length];
+            } else {
+                this.img = this.frame.death[this.frameDeathindex++];
+                // 到4英雄撕掉
+                if(this.frameDeathindex === this.frame.death.length) {
+                    this.destory = true;
+                }
+            }
             this.lastTime = currentTime;
         }
     }
@@ -314,6 +327,9 @@ class Hero {
             this.lastShootTime = currentTime;
         }
     }
+    collide() {
+        this.live = false;
+    }
 }
 
 //初始化子弹类
@@ -324,6 +340,7 @@ class Bullet {
         this.height = config.height;
         this.x = x;
         this.y = y;
+        this.destory = false;
     }
 
     move() {
@@ -335,6 +352,10 @@ class Bullet {
     outofBounds() {
         // 如果为真，则应该销毁子弹
         return this.y < 0 - this.height;
+    }
+    collide() {
+        // 让子弹变成可销毁状态
+        this.destory = true;
     }
 }
 
@@ -364,13 +385,27 @@ class Enemy {
         this.speed = Math.floor(Math.random() * (config.minSpeed - config.maxSpeed + 1)) + config.maxSpeed;
         // 最后时间标识 在这个时间段它不变化，但是过了这个时间段就要变化
         this.lastTime = new Date().getTime();
+        // 死亡下标
+        this.deathIndex = 0;
+        // 确认销毁
+        this.destory = false;
     }
     // 判定是否需要渲染/怎么渲染/是否移动
     move() {
         const currentTime = new Date().getTime();
         if(currentTime - this.lastTime >= this.speed) {
-            this.img = this.frame.live[0];
-            this.y++;
+            if(this.live) {
+                this.img = this.frame.live[0];
+                this.y++;
+            } else {
+                // 死的时候播放死亡动画
+                // 飞机三个阶段：活着 爆炸中 死亡
+                this.img = this.frame.death[this.deathIndex++];
+                // 死亡动画播放完毕销毁敌机
+                if(this.deathIndex === this.frame.death.length) {
+                    this.destory = true;
+                }
+            }
             // 修正上一次时间
             this.lastTime = currentTime;
         }
@@ -379,7 +414,49 @@ class Enemy {
         context.drawImage(this.img, this.x, this.y);
     }
     outofBounds() {
-        
+        if(this.y > 650) {
+            return true;
+        }
+    }
+    // 检测敌机是否撞到其他物体
+    // 敌机e 子弹o
+    hit(o) {
+        // 其他物体的左边
+        let ol = o.x;
+        // 其他物体的右边
+        let or = o.x + o.width;
+        // 其他物体的顶边
+        let ot = o.y;
+        // 其他物体的底边
+        let ob = o.y + o.height;
+        // 敌机的左边
+        let el = this.x;
+        // 敌机的右边
+        let er = this.x + this.width;
+        // 敌机的顶边
+        let et = this.y;
+        // 敌机的底边
+        let eb = this.y + this.height;
+        // 判断是否碰到
+        if(ol > er || or < el || ot > eb || ob < et) {
+            //满足条件则表示没碰到
+            return false;
+        } else {
+            return true;
+        }
+    }
+    collide() {
+        // 中弹生命减少
+        this.life--;
+        // 生命降低为0时需要调用其他方法
+        if(this.life === 0) {
+            // 1 将live标记为死亡
+            // 2 播放死亡动画
+            // 3 放完动画才真正销毁
+            this.live = false;
+            // 收获到敌机分数
+            score += this.score;
+        }
     }
 }
 
@@ -388,11 +465,14 @@ const sky = new Sky(skyconfig);
 //初始化飞机界面加载实例
 const loading = new Loading(loadingconfig)
 //初始化英雄实例
-const hero = new Hero(heroconfig)
+let hero = new Hero(heroconfig)
 
 
 // 游戏状态
 let state = START;
+// score 分数变量 life变量
+let score = 0;
+let life = 3;
 // 为canvas绑定一个点击事件，且他如果是START状态时需修改成STARTING状态
 canvas.addEventListener("click", () => {
     if(state === START) {
@@ -406,6 +486,41 @@ canvas.addEventListener("mousemove", (e) => {
     hero.y = e.offsetY - hero.height/2;
 })
 
+// 为canvas绑定一个鼠标离开事件 running -> pause
+canvas.addEventListener("mouseleave", () => {
+    if(state === RUNNING) {
+        state = PAUSE;
+    }
+})
+// 进入事件 pause -> running
+canvas.addEventListener("mouseenter", () => {
+    if(state === PAUSE) {
+        state = RUNNING;
+    }    
+})
+
+// 碰撞检测函数
+function checkHit() {
+    // 遍历所有的敌机
+    for(let i = 0; i < enemies.length; i++) {
+        if(enemies[i].hit(hero)) {
+            //英雄和敌机碰撞
+            enemies[i].collide();
+            hero.collide();
+        }
+        // 遍历所有的子弹
+        for(let j = 0; j < hero.bulletList.length; j++) {
+            // 用第i的敌机和第j个子弹进行碰撞检测 返回布尔类型
+            // enemies[i].hit(hero.bulletList[j]);
+            // 如果碰到了 做某些事情
+            if(enemies[i].hit(hero.bulletList[j])) {
+                // 清除敌机和子弹
+                enemies[i].collide();
+                hero.bulletList[j].collide();
+            }
+        }
+    }
+}
 // 变量中所有的敌机实例
 const enemies = [];
 // 敌机产生的速率
@@ -438,24 +553,54 @@ function judegeComponent() {
         enemies[i].move();
     }
 }
-// 全局函数绘制所有子弹组件
+// 全局函数绘制所有子弹组件 score life
 function paintComponent() {
     for(let i = 0; i < hero.bulletList.length; i++) {
         hero.bulletList[i].paint(context);
     }
     for(let i = 0; i < enemies.length; i++) {
         enemies[i].paint(context);
-    }    
+    }   
+    // 绘制score和Life
+    context.font = "20px 微软雅黑"; 
+    context.fillStyle = "red"
+    context.textAlign = "left";
+    context.fillText("score: " + score, 10, 20);
+    context.textAlign = "right";
+    context.fillText("life: " + life, 480 -10, 20);
+
+    // 重置代码 重置画笔
+    context.fillStyle = "black"
+    context.textAlign = "left";
 }
-// 全局函数销毁所有的子弹/敌人组件
+// 全局函数销毁所有的子弹/敌人组件/英雄
 function deleteComponent() {
+    if(hero.destory) {
+        // destory则生命--
+        life--;
+        hero.destory = false;
+        // 生命值为0才进入游戏结束状态
+        // 否则产生新的英雄飞机
+        if(life === 0) {
+            state = END;
+        } else {
+            hero = new Hero(heroconfig);
+        }
+    }
     for(let i = 0; i < hero.bulletList.length; i++) {
-        // 判断有无飞出边界
-        if(hero.bulletList[i].outofBounds()) {
+        // 判断有无飞出边界 或destroy状态
+        if(hero.bulletList[i].outofBounds() || hero.bulletList[i].destory) {
             // splic：参数1：操作位 参数2：操作数
             hero.bulletList.splice(i, 1);
         }
-    }    
+    } 
+    for(let i = 0; i < enemies.length; i++) {
+        // 如果敌机待销毁，则销毁
+        // enemies[i].outofBounds() || 
+        if(enemies[i].destory) {
+            enemies.splice(i, 1);
+        }
+    }   
 }
 
 //图片加载完毕后做事
@@ -491,14 +636,24 @@ bg.addEventListener("load", () => {
                 hero.shoot();
                 createComponent()
                 judegeComponent();
-                paintComponent();
                 deleteComponent();
+                paintComponent();
+                checkHit();
                 break;
             case PAUSE:
                 // 暂停图标
+                let pause_x = (480 - pause.naturalWidth)/2;
+                let pause_y = (650 - pause.naturalHeight)/2;
+                context.drawImage(pause, pause_x, pause_y);
                 break;
             case END:
                 // game over
+                context.font = "bold 24px 微软雅黑";
+                // 文本水平方式
+                context.textAlign = "center";
+                // 文本垂直对齐方式
+                context.textBaseline = "middle";
+                context.fillText("GAME OVER", 480/2, 650/2)
                 break;
 
         }
